@@ -1,8 +1,10 @@
+from . import logger
+from . import handler
+from . import aws
 import time
-import logger
-import aws
 
-logger = logger.Logger()
+logger = logger.get_logger()
+error_type = handler.ErrorType
 aws = aws.Aws()
 
 
@@ -34,15 +36,15 @@ class Database:
 
     def has_completed(self):
         if self.backup_job_id is None:
-            logger.warn("backup_job_idが見つかりません")
-            return False
+            # 異常エラー終了
+            handler.handle_error(error_type.RDS_BACKUP_JOB_ID_NOT_FOUND)
         status = aws.describe_backup_job(self.backup_job_id)["State"]
         if status == "COMPLETED":
-            logger.info("バックアップジョブが成功しました:" + self.backup_job_id)
+            logger.info("RDSのバックアップジョブが成功しました:" + self.backup_job_id)
             return True
         elif status == "FAILED":
-            logger.warn("バックアップジョブが失敗しました:" + self.backup_job_id)
-            return False
+            handler.handle_error(
+                error_type.RDS_BACKUP_JOB_FAILED, message=self.backup_job_id)
         else:
             return False
 
@@ -55,5 +57,5 @@ class Database:
             else:
                 logger.info("リトライ回数: " + str(r))
                 time.sleep(interval)
-        logger.warn("リトライ回数の上限を超過しました")
+        logger.warning("リトライ回数の上限を超過しました")
         return False

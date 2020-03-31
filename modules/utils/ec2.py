@@ -1,9 +1,12 @@
 import time
-import logger
-import aws
+from . import logger
+from . import handler
+from . import aws
 
-logger = logger.Logger()
+logger = logger.get_logger()
+error_type = handler.ErrorType
 aws = aws.Aws()
+
 
 class Instance:
     def __init__(self, id):
@@ -16,7 +19,8 @@ class Instance:
         response = aws.describe_instances(self.id)
         self.account_id = response["Reservations"][0]["OwnerId"]
         self.region = aws.get_region()
-        self.arn = "arn:aws:ec2:" + self.region + ":" + self.account_id + ":instance/" + self.id
+        self.arn = "arn:aws:ec2:" + self.region + ":" + \
+            self.account_id + ":instance/" + self.id
         self.detail = response
 
     def stop(self):
@@ -36,27 +40,27 @@ class Instance:
         )["BackupJobId"]
         self.set_backup_job(self.backup_job_id)
 
-    def set_backup_job(self, backup_job_id):        
+    def set_backup_job(self, backup_job_id):
         self.backup_job_id = backup_job_id
         logger.info("backup_job_id: " + self.backup_job_id)
 
     def has_completed(self):
         if self.backup_job_id is None:
-            logger.warn("backup_job_idが見つかりません")
-            return False
+            # 異常エラー終了
+            handler.handle_error(error_type.EC2_BACKUP_JOB_ID_NOT_FOUND)
         status = aws.describe_backup_job(self.backup_job_id)["State"]
         if status == "COMPLETED":
-            logger.info("バックアップジョブが成功しました:" + self.backup_job_id)
+            logger.info("EC2のバックアップジョブが成功しました:" + self.backup_job_id)
             return True
         elif status == "FAILED":
-            logger.warn("バックアップジョブが失敗しました:" + self.backup_job_id)
-            return False
+            handler.handle_error(
+                error_type.EC2_BACKUP_JOB_FAILED, message=self.backup_job_id)
         else:
             return False
 
     def has_stopped(self):
-        response = aws.describe_instance_status(self.id)
-        instance_state = response["InstanceStatuses"][0]["InstanceState"]["Name"]
+        response = aws.describe_instances(self.id)
+        instance_state = response["Reservations"][0]["Instances"][0]["State"]["Name"]
         if instance_state == "stopped":
             return True
         else:
@@ -72,7 +76,7 @@ class Instance:
         else:
             return False
 
-    def wait_for_start(self, interval = 30, retries = 30):
+    def wait_for_started(self, interval=30, retries=30):
         logger.info("インスタンスが起動するまで待機します")
         for r in range(retries):
             if self.has_started():
@@ -81,10 +85,10 @@ class Instance:
             else:
                 logger.info("リトライ回数: " + str(r))
                 time.sleep(interval)
-        logger.warn("リトライ回数の上限を超過しました")
+        logger.warning("リトライ回数の上限を超過しました")
         return False
 
-    def wait_for_stop(self, interval = 30, retries = 30):
+    def wait_for_stopped(self, interval=30, retries=30):
         logger.info("インスタンスが停止するまで待機します")
         for r in range(retries):
             if self.has_stopped():
@@ -93,10 +97,10 @@ class Instance:
             else:
                 logger.info("リトライ回数: " + str(r))
                 time.sleep(interval)
-        logger.warn("リトライ回数の上限を超過しました")
+        logger.warning("リトライ回数の上限を超過しました")
         return False
 
-    def wait_for_completed(self, interval = 30, retries = 30):
+    def wait_for_completed(self, interval=30, retries=30):
         logger.info("バックアップ作成が完了するまで待機します")
         for r in range(retries):
             if self.has_completed():
@@ -105,5 +109,5 @@ class Instance:
             else:
                 logger.info("リトライ回数: " + str(r))
                 time.sleep(interval)
-        logger.warn("リトライ回数の上限を超過しました")
+        logger.warning("リトライ回数の上限を超過しました")
         return False
